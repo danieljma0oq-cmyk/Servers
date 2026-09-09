@@ -128,8 +128,10 @@ class ServerSetup(commands.Cog):
                 raise ErrorInstalacion(elemento=nombre, tipo="rol", motivo=str(e))
         return creados
 
-    async def _crear_categorias_y_canales(self, guild: discord.Guild):
+    async def _crear_categorias_y_canales(self, guild: discord.Guild, on_progreso=None):
         stats = {"categorias": 0, "texto": 0, "voz": 0}
+        total_categorias = len(config.CATEGORIAS_TEXTO) + 1  # +1 por la de voz
+        hechas = 0
 
         # --- categorías de texto ---
         for cat_cfg in config.CATEGORIAS_TEXTO:
@@ -155,6 +157,11 @@ class ServerSetup(commands.Cog):
                 except discord.HTTPException as e:
                     raise ErrorInstalacion(elemento=nombre_canal, tipo="canal de texto", motivo=str(e))
 
+            hechas += 1
+            if on_progreso:
+                await on_progreso(hechas, total_categorias)
+            await asyncio.sleep(0.5)  # margen para no saturar el rate limit de Discord
+
         # --- categoría de voz ---
         voz_cfg = config.CATEGORIA_VOZ
         categoria_voz = self._buscar_categoria(guild, voz_cfg["nombre"])
@@ -178,6 +185,10 @@ class ServerSetup(commands.Cog):
                 stats["voz"] += 1
             except discord.HTTPException as e:
                 raise ErrorInstalacion(elemento=nombre_canal, tipo="canal de voz", motivo=str(e))
+
+        hechas += 1
+        if on_progreso:
+            await on_progreso(hechas, total_categorias)
 
         return stats
 
@@ -247,6 +258,15 @@ class ServerSetup(commands.Cog):
             )
             await mensaje.edit(embed=embed, view=None)
 
+        async def reportar_progreso_categorias(hechas: int, total: int):
+            pasos[2] = f"⏳ Creando categorías y canales ({hechas}/{total})"
+            embed = discord.Embed(
+                title="⚙️ CONFIGURANDO SERVIDOR...",
+                description="\n".join(pasos),
+                color=discord.Color.blurple(),
+            )
+            await mensaje.edit(embed=embed, view=None)
+
         try:
             await actualizar(0, "✅")
             await self._comprobar_permisos_bot(guild)
@@ -257,8 +277,8 @@ class ServerSetup(commands.Cog):
 
             await actualizar(2, "⏳")
             await actualizar(3, "⬜")
-            stats = await self._crear_categorias_y_canales(guild)
-            await actualizar(2, "✅")
+            stats = await self._crear_categorias_y_canales(guild, on_progreso=reportar_progreso_categorias)
+            pasos[2] = "✅ Creando categorías y canales"
             await actualizar(3, "✅")
 
             await actualizar(4, "✅")  # los permisos se aplicaron al crear cada elemento
@@ -272,6 +292,22 @@ class ServerSetup(commands.Cog):
                     f"**Tipo:**\n`{e.tipo}`\n\n"
                     f"**Motivo:**\n`{e.motivo}`\n\n"
                     "El proceso se ha detenido para evitar realizar cambios innecesarios."
+                ),
+                color=discord.Color.red(),
+            )
+            return await mensaje.edit(embed=embed_error, view=None)
+
+        except Exception as e:
+            # Cualquier error no previsto (rate limit raro, permisos de
+            # jerarquía, etc.) también debe avisar en vez de dejar el
+            # mensaje congelado.
+            print(f"[!server] Error inesperado: {type(e).__name__}: {e}")
+            embed_error = discord.Embed(
+                title="❌ ERROR INESPERADO DURANTE LA CONFIGURACIÓN",
+                description=(
+                    f"**Tipo:**\n`{type(e).__name__}`\n\n"
+                    f"**Detalle:**\n`{e}`\n\n"
+                    "Revisa los logs de Railway para más detalle. El proceso se detuvo aquí."
                 ),
                 color=discord.Color.red(),
             )
