@@ -178,7 +178,7 @@ class ServerSetup(commands.Cog):
                 overwrites_canal = _resolver_overwrites(guild, permisos_canal) if permisos_canal else {}
                 try:
                     await guild.create_text_channel(
-                        nombre_canal, category=categoria, overwrites=overwrites_canal or None
+                        nombre_canal, category=categoria, overwrites=overwrites_canal
                     )
                     stats["texto"] += 1
                 except discord.HTTPException as e:
@@ -207,7 +207,7 @@ class ServerSetup(commands.Cog):
             overwrites_canal = _resolver_overwrites(guild, permisos_canal) if permisos_canal else {}
             try:
                 await guild.create_voice_channel(
-                    nombre_canal, category=categoria_voz, overwrites=overwrites_canal or None
+                    nombre_canal, category=categoria_voz, overwrites=overwrites_canal
                 )
                 stats["voz"] += 1
             except discord.HTTPException as e:
