@@ -45,9 +45,10 @@ class ErrorInstalacion(Exception):
 
 class ConfirmarServerView(discord.ui.View):
     def __init__(self, autor_id: int):
-        super().__init__(timeout=120)
+        super().__init__(timeout=180)
         self.autor_id = autor_id
         self.decision = None  # True / False / None (timeout)
+        self.mensaje: discord.Message | None = None  # se asigna después de enviar el mensaje
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.autor_id:
@@ -78,6 +79,32 @@ class ConfirmarServerView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
+        # IMPORTANTE: sin esto, los botones se ven activos en Discord
+        # para siempre aunque la vista ya haya expirado por dentro, y
+        # al pulsarlos el usuario ve "La aplicación no responde".
+        if self.mensaje is not None:
+            embed = discord.Embed(
+                title="⏰ Tiempo agotado",
+                description="No se confirmó a tiempo. Ejecuta `!server` de nuevo si quieres continuar.",
+                color=discord.Color.greyple(),
+            )
+            try:
+                await self.mensaje.edit(embed=embed, view=self)
+            except discord.HTTPException:
+                pass
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item):
+        # Red de seguridad: garantiza que la interacción SIEMPRE reciba
+        # una respuesta, aunque algo falle de forma inesperada.
+        print(f"[ConfirmarServerView] Error en botón: {type(error).__name__}: {error}")
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.send_message(
+                    "❌ Ocurrió un error inesperado. Ejecuta `!server` de nuevo.",
+                    ephemeral=True,
+                )
+            except discord.HTTPException:
+                pass
 
 
 class ServerSetup(commands.Cog):
@@ -222,10 +249,15 @@ class ServerSetup(commands.Cog):
         )
         view = ConfirmarServerView(ctx.author.id)
         mensaje = await ctx.send(embed=embed_confirmacion, view=view)
+        view.mensaje = mensaje
 
         await view.wait()
 
-        if view.decision is not True:
+        if view.decision is None:
+            # Ya expiró: on_timeout se encargó de editar el mensaje.
+            return
+
+        if view.decision is False:
             embed_cancelado = discord.Embed(
                 title="❌ Instalación cancelada",
                 description="No se ha creado ni modificado nada.",
